@@ -1,0 +1,9 @@
+package com.flourish.intelliride.dtos;
+
+import lombok.Data;
+
+@Data
+public class RatingDto {
+    private Long rideId;
+    private Integer rating;
+}

@@ -1,0 +1,56 @@
+spring:
+  ai:
+    mcp:
+      server:
+        name: intelliride-mcp
+        version: 1.0.0
+        type: SYNC
+        keep-alive-interval: 30s     # heartbeat keeps the SSE connection open
+        request-timeout: 60s         # more headroom for tool calls
+        # defaults: SSE endpoint /sse, message endpoint /mcp/message
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.3
+      embedding:
+        options:
+          model: text-embedding-3-small
+    vectorstore:
+        pgvector:
+          initialize-schema: true
+
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
+            table-name: chat_memory
+  application:
+    name: IntelliRide
+  datasource:
+    url: jdbc:postgresql://localhost:5432/spatial_db?sslmode=disable
+    username: pallavisharma
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    defer-datasource-initialization: true
+
+  sql:
+    init:
+      mode: always
+      data-locations: classpath:data.sql
+
+jwt:
+  secretKey: ${JWT_SECRET_KEY}
+
+logging:
+  level:
+    org.springframework.ai.chat.client.advisor: DEBUG
