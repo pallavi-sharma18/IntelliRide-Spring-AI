@@ -60,6 +60,7 @@ decisions fully observable.
 ---
 
 ## Architecture
+![Uploading Screenshot 2026-06-21 at 15.35.09.png…]()
 
 ```mermaid
 flowchart TB
