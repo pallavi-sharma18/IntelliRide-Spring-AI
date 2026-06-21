@@ -60,7 +60,8 @@ decisions fully observable.
 ---
 
 ## Architecture
-![Uploading Screenshot 2026-06-21 at 15.35.09.png…]()
+<img width="672" height="548" alt="Screenshot 2026-06-21 at 15 37 39" src="https://github.com/user-attachments/assets/469ef636-13a6-424e-ad0a-5aa7f81c2768" />
+
 
 ```mermaid
 flowchart TB
