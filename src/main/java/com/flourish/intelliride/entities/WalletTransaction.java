@@ -28,6 +28,10 @@ public class WalletTransaction {
     @ManyToOne
     private Ride ride;
 
+    // Idempotency key for money movements. UNIQUE so the same logical transaction
+    // (e.g. "ride:42:rider-debit") can be inserted at most once — the database is the
+    // final backstop against a double debit/credit.
+    @Column(unique = true)
     private String transactionId;
 
     @ManyToOne

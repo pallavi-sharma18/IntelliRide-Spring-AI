@@ -21,6 +21,13 @@ public class PaymentServiceImpl implements PaymentService {
         Payment payment = paymentRepository.findByRide(ride).orElseThrow(
                 () -> new ResourceNotFoundException("Payment not found for ride: "+ ride.getId())
         );
+
+        // Idempotent guard: a CONFIRMED payment has already moved money. Re-running the
+        // strategy would debit/credit the wallets a second time, so treat this as a no-op.
+        if (payment.getPaymentStatus() == PaymentStatus.CONFIRMED) {
+            return;
+        }
+
         paymentStrategyManager.paymentStrategy(payment.getPaymentMethod()).processPayment(payment);
     }
 

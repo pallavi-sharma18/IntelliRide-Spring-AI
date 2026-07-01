@@ -47,4 +47,10 @@ public class Ride {
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
     private String otp;
+
+    // Optimistic lock: guards against two concurrent endRide calls both settling the
+    // same ride. Hibernate stamps updates with WHERE version = ? and bumps it; the
+    // losing transaction matches zero rows and rolls back with OptimisticLockException.
+    @Version
+    private Long version;
 }

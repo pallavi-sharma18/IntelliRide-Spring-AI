@@ -9,6 +9,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
@@ -124,6 +126,11 @@ public class DriverTools {
         try {
             driverService.endRide(rideId);
             audit("endRide", "EXECUTED", rideId);
+            return "Ride " + rideId + " has ended and payment was processed.";
+        } catch (OptimisticLockingFailureException | DataIntegrityViolationException e) {
+            // Lost a concurrent settlement race — the ride is already ended and paid.
+            // Report success idempotently rather than surfacing a DB error to the model.
+            audit("endRide", "ALREADY_SETTLED", rideId);
             return "Ride " + rideId + " has ended and payment was processed.";
         } catch (Exception e) {
             audit("endRide", "FAILED", rideId, e.getMessage());

@@ -14,6 +14,10 @@ public interface DriverService {
     RideDto startRide(Long rideId,String otp);
     RideDto endRide(Long rideId);
 
+    /** Read-only fetch of an already-ended ride, used to answer a concurrent-loser
+     *  settlement attempt idempotently (see DriverController.endRide). */
+    RideDto getEndedRide(Long rideId);
+
     RiderDto rateRider(Long rideId, Integer rating);
 
     DriverDto getMyProfile();

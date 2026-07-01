@@ -54,7 +54,10 @@ public class WalletServiceImpl implements WalletService {
                 .wallet(wallet)
                 .amount(amount)
                 .build();
-        wallet.getTransactions().add(walletTransaction);
+        // Persist the debit explicitly (mirrors addMoneyToWallet). The relationship has no
+        // cascade, so adding to wallet.getTransactions() alone would never insert the row —
+        // which would also bypass the UNIQUE(transaction_id) idempotency backstop.
+        walletTransactionService.createNewWalletTransaction(walletTransaction);
         return walletRepository.save(wallet);
     }
 

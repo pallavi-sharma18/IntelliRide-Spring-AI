@@ -18,9 +18,13 @@ public class CashPaymentStrategy implements PaymentStrategy {
     @Override
     public void processPayment(Payment payment) {
         Driver driver = payment.getRide().getDriver();
+        Long rideId = payment.getRide().getId();
         double platformCommission = payment.getAmount()*0.3;
 
-        walletService.deductMoneyFromWallet(driver.getUser(),platformCommission,null,
+        // Deterministic idempotency key (see WalletPaymentStrategy) so a retried
+        // settlement cannot deduct the platform commission twice.
+        walletService.deductMoneyFromWallet(driver.getUser(), platformCommission,
+                "ride:" + rideId + ":platform-commission",
                 payment.getRide(), TransactionMethod.RIDE);
 
         payment.setPaymentStatus(PaymentStatus.CONFIRMED);
