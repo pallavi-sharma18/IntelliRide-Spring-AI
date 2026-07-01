@@ -63,58 +63,6 @@ decisions fully observable.
 <img width="672" height="548" alt="Screenshot 2026-06-21 at 15 37 39" src="https://github.com/user-attachments/assets/469ef636-13a6-424e-ad0a-5aa7f81c2768" />
 
 
-```mermaid
-flowchart TB
-    subgraph Clients
-        U[Rider / Driver app or Postman]
-        CD[External MCP client<br/>e.g. Claude Desktop]
-    end
-
-    subgraph App["IntelliRide (Spring Boot)"]
-        direction TB
-
-        AC["/ai/chat<br/>AIController"]
-        SUP["SupervisorService<br/>route · plan · confirm · resume"]
-
-        subgraph Planning
-            PL["PlannerService<br/>goal → Plan (structured output)"]
-            PS["PendingPlanStore<br/>pause / resume"]
-        end
-
-        subgraph Agents["Specialized agents (own ChatClient each)"]
-            RA[RiderAgent]
-            DA[DriverAgent]
-            SA["SupportAgent (RAG)"]
-        end
-
-        subgraph Tools["Tools (@Tool)"]
-            RT[RiderTools]
-            DT[DriverTools]
-        end
-
-        MCP["MCP Server (SSE)<br/>/sse + /mcp/message"]
-        RS["Domain services<br/>(business rules + security)"]
-        VS[(pgvector<br/>vector_store)]
-        DB[(PostgreSQL + PostGIS)]
-    end
-
-    LLM[["OpenAI<br/>gpt-4o + embeddings"]]
-
-    U -->|JWT| AC --> SUP
-    SUP --> PL
-    SUP <--> PS
-    SUP --> RA & DA & SA
-    RA --> RT
-    DA --> DT
-    SA -->|retrieve top-K| VS
-    RT & DT --> RS --> DB
-
-    CD -->|Bearer PAT| MCP --> Tools
-    RA & DA & SA <-->|prompt / tool calls| LLM
-    PL <-->|plan JSON| LLM
-    VS <-->|embeddings| LLM
-```
-
 > **Note:** the **MCP path bypasses the agentic layer** — when Claude Desktop calls a tool it hits
 > `RiderTools`/`DriverTools` directly, so *its* model is the orchestrator. The supervisor/planner/agents
 > only run behind the HTTP `/ai/chat` endpoint.
