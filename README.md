@@ -1,11 +1,16 @@
-# IntelliRide — Agentic AI Ride-Booking Backend
+# IntelliRide — Agentic AI Ride-Hailing Backend
 
-A Spring Boot ride-hailing backend (riders, drivers, rides, wallet, ratings) augmented with an
-**agentic AI layer**: a multi-agent system that routes requests to specialized agents, **plans and
-executes multi-step goals autonomously**, asks for human confirmation before changing data, and
-returns a full **reasoning trace** of every decision.
+IntelliRide is a **complete ride-hailing backend** — riders, drivers, the full ride lifecycle
+(request → match → OTP start → end → pay → rate), wallets, and ratings — exposed as a plain,
+authenticated **REST API**. The whole thing runs end-to-end with the LLM involved in *no* request;
+see [The core ride-hailing backend](#the-core-ride-hailing-backend-works-without-the-ai-layer).
 
-It demonstrates five AI building blocks working together:
+On top of that foundation sits an **agentic AI layer**: a multi-agent system that routes requests to
+specialized agents, **plans and executes multi-step goals autonomously**, asks for human confirmation
+before changing data, and returns a full **reasoning trace** of every decision. Everything the AI can
+do is also a direct REST call — the AI is an *augmentation*, not the application.
+
+The AI layer demonstrates five building blocks working together:
 
 | Concept | What it does here | Key code |
 |--------|-------------------|----------|
@@ -24,6 +29,52 @@ It demonstrates five AI building blocks working together:
 - **OpenAI** — `gpt-4o` (chat) + `text-embedding-3-small` (embeddings)
 - **PostgreSQL + PostGIS** (spatial) + **pgvector** (RAG vector store)
 - **Spring Security + JWT**, Redis, OSRM (distance), ModelMapper
+
+---
+
+## The core ride-hailing backend (works without the AI layer)
+
+Underneath the agentic layer, IntelliRide is a full ride-hailing REST API. Every action the assistant
+performs is also available as a plain authenticated REST call, and the whole ride-hailing API runs
+without the LLM being involved in any request.
+
+### Ride lifecycle
+
+```
+rider requests   →   driver accepts        →   driver starts (OTP)      →   driver ends           →   both rate
+(RideRequest,        (Ride + 4-digit OTP        (verify OTP; Payment         (fare finalized,          (rateDriver /
+ PENDING)             created, CONFIRMED)         PENDING + Rating row)        wallet settled,           rateRider)
+                                                                               30% commission)
+```
+
+Status flow — `RideRequest`: `PENDING → CONFIRMED`; `Ride`: `CONFIRMED → ONGOING → ENDED` (or `CANCELLED`).
+
+### Direct REST API
+
+| Area | Endpoints |
+|------|-----------|
+| **Auth** *(public)* | `POST /auth/signup` (creates a RIDER), `POST /auth/login` (→ JWT), `POST /auth/mcp-token`, `POST /auth/onBoardNewDriver/{userId}` *(ROLE_ADMIN)* |
+| **Rider** *(`ROLE_RIDER`)* | `POST /rider/requestRide`, `POST /rider/cancelRide/{rideId}`, `POST /rider/rateDriver`, `GET /rider/getMyProfile`, `GET /rider/getMyRides` |
+| **Driver** *(`ROLE_DRIVER`)* | `POST /drivers/acceptRide/{rideRequestId}`, `POST /drivers/startRide/{rideId}`, `POST /drivers/endRide/{rideId}`, `POST /drivers/cancelRide/{rideId}`, `POST /drivers/rateRider`, `GET /drivers/getMyProfile`, `GET /drivers/getMyRides` |
+
+Responses are wrapped by `GlobalResponseHandler` as `{ "data": ..., "error": ... }`, and the acting
+user is always resolved from the JWT — endpoints never take a caller id.
+
+### Domain model & business rules
+
+- **Entities** — `User` (roles: RIDER / DRIVER / ADMIN), `Rider`, `Driver`, `RideRequest`, `Ride`,
+  `Payment`, `Wallet` + `WalletTransaction` (ledger), `Rating`.
+- **Strategy pattern** (`strategies/`) — rules chosen at runtime by a `RideStrategyManager`:
+  - *Fare* — default vs. **surge pricing** during peak hours (18:00–21:00).
+  - *Driver matching* — **nearest** driver, or **highest-rated** for riders rated ≥ 4.8.
+- **Payments & wallet** — `CASH` or `WALLET`; settlement debits the rider, credits the driver (minus
+  a **30% platform commission**), and writes `WalletTransaction` ledger rows.
+- **Idempotent, concurrency-safe settlement** — `endRide` → payment is guarded by optimistic locking
+  (`@Version` on `Ride`) and a unique ledger key, so a retried or concurrent `endRide` can never
+  double-charge (details in [`docs/IDEMPOTENCY_CHANGES.md`](docs/IDEMPOTENCY_CHANGES.md)).
+- **Geospatial** — pickup/drop-off stored as **PostGIS** points (SRID 4326); road distance via **OSRM**.
+- **Security** — stateless **JWT**; method-level `@Secured` role checks; ownership/status validated
+  server-side in the domain services.
 
 ---
 
@@ -194,6 +245,35 @@ Sample response shape:
 ```
 Reply **"yes"** in a follow-up request (same token → same `conversationId`) to resume the plan.
 
+### Drive a full ride with plain REST (no AI)
+
+The same flow the assistant automates, done directly — no LLM involved. Uses the seeded test accounts
+(`testrider@uber.com` / `testdriver@uber.com`, password `Test@1234`):
+
+```bash
+# rider + driver access tokens
+RTOK=$(curl -s -X POST localhost:8080/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"testrider@uber.com","password":"Test@1234"}' | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+DTOK=$(curl -s -X POST localhost:8080/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"testdriver@uber.com","password":"Test@1234"}' | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+# 1. rider requests a ride (returns the RideRequest id)
+curl -s -X POST localhost:8080/rider/requestRide -H "Authorization: Bearer $RTOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"pickupLocation":{"type":"Point","coordinates":[77.2090,28.6139]},
+       "dropOffLocation":{"type":"Point","coordinates":[77.2500,28.6500]},"paymentMethod":"WALLET"}'
+
+# 2. driver accepts it → returns the ride id + OTP
+curl -s -X POST localhost:8080/drivers/acceptRide/1 -H "Authorization: Bearer $DTOK"
+
+# 3. driver starts the ride with the rider's OTP  (creates the PENDING payment)
+curl -s -X POST localhost:8080/drivers/startRide/1 -H "Authorization: Bearer $DTOK" \
+  -H 'Content-Type: application/json' -d '{"otp":"<otp-from-step-2>"}'
+
+# 4. driver ends the ride → fare finalized, wallets settled (idempotent + concurrency-safe)
+curl -s -X POST localhost:8080/drivers/endRide/1 -H "Authorization: Bearer $DTOK"
+```
+
 ### Connect from Claude Desktop (MCP)
 `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
@@ -220,7 +300,8 @@ have to restart Claude when it expires. Requires Node 18+.
 | POST | `/auth/signup`, `/auth/login` | Auth (returns JWT) |
 | POST | `/auth/mcp-token` | Mint a 30-day token for MCP clients |
 | POST | `/ai/chat` | Talk to the agentic assistant (`{ "message": "..." }`) — returns `reply` + `reasoning` |
-| POST | `/rider/...`, `/drivers/...` | Direct rider/driver actions |
+| POST/GET | `/rider/*` | Rider actions — request/cancel/rate, profile, rides ([details](#the-core-ride-hailing-backend-works-without-the-ai-layer)) |
+| POST/GET | `/drivers/*` | Driver actions — accept/start/end/cancel/rate, profile, rides ([details](#the-core-ride-hailing-backend-works-without-the-ai-layer)) |
 | GET/POST | `/sse`, `/mcp/message` | MCP server (SSE transport) |
 | GET | `/swagger-ui.html` | API docs |
 
