@@ -10,6 +10,7 @@ import com.flourish.intelliride.entities.User;
 import com.flourish.intelliride.entities.enums.RideRequestStatus;
 import com.flourish.intelliride.entities.enums.RideStatus;
 import com.flourish.intelliride.exceptions.ResourceNotFoundException;
+import com.flourish.intelliride.exceptions.RuntimeConflictException;
 import com.flourish.intelliride.repositories.DriverRepository;
 import com.flourish.intelliride.services.*;
 import lombok.RequiredArgsConstructor;
@@ -100,8 +101,14 @@ public class DriverServiceImpl implements DriverService {
             throw new RuntimeException("Driver cannot end the ride as he does not own this ride");
         }
 
+        // Idempotent retry: a ride that is already ENDED has already been settled.
+        // Return the same result instead of throwing, and do NOT re-enter the payment path.
+        if(ride.getRideStatus().equals(RideStatus.ENDED)){
+            return modelMapper.map(ride, RideDto.class);
+        }
+
         if(!ride.getRideStatus().equals(RideStatus.ONGOING)){
-            throw new RuntimeException("Ride status is not Ongoing hence cannot be ended, status: " + ride.getRideStatus());
+            throw new RuntimeConflictException("Ride status is not Ongoing hence cannot be ended, status: " + ride.getRideStatus());
         }
         ride.setEndedAt(LocalDateTime.now());
         Ride savedRide = rideService.updateRideStatus(ride,RideStatus.ENDED);
@@ -110,6 +117,15 @@ public class DriverServiceImpl implements DriverService {
 
         return modelMapper.map(savedRide,RideDto.class);
 
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RideDto getEndedRide(Long rideId) {
+        // The winner of a concurrent settlement race has already committed, so the ride
+        // is ENDED by now. Return its current state so the losing call is idempotent.
+        Ride ride = rideService.getRideById(rideId);
+        return modelMapper.map(ride, RideDto.class);
     }
 
     @Override

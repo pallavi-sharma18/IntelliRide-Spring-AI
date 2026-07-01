@@ -4,6 +4,8 @@ package com.flourish.intelliride.controllers;
 import com.flourish.intelliride.dtos.*;
 import com.flourish.intelliride.services.DriverService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -32,7 +34,13 @@ public class DriverController {
     @PostMapping("endRide/{rideId}")
     public ResponseEntity<RideDto> endRide(@PathVariable Long rideId)
     {
-        return ResponseEntity.ok(driverService.endRide(rideId));
+        try {
+            return ResponseEntity.ok(driverService.endRide(rideId));
+        } catch (OptimisticLockingFailureException | DataIntegrityViolationException e) {
+            // Lost a concurrent settlement race — the winning call already ended and paid
+            // out this ride. Return the already-settled ride as a clean 200 instead of a 500.
+            return ResponseEntity.ok(driverService.getEndedRide(rideId));
+        }
     }
 
     @PostMapping("/cancelRide/{rideId}")
